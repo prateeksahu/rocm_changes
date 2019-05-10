@@ -1,0 +1,61 @@
+diff --git a/include/hc_am.hpp b/include/hc_am.hpp
+index 3cefa4ec..43de9db0 100644
+--- a/include/hc_am.hpp
++++ b/include/hc_am.hpp
+@@ -92,6 +92,8 @@ namespace hc {
+  * @see am_free, am_copy
+  */
+ 
++auto_voidp am_aligned_alloc_with_flags(std::size_t size, hc::accelerator &acc, unsigned flags, std::size_t alignment = 0, unsigned memFlags = 0);
++
+ auto_voidp am_aligned_alloc(std::size_t size, hc::accelerator &acc, unsigned flags, std::size_t alignment = 0);
+ 
+ /**
+@@ -112,6 +114,8 @@ auto_voidp am_aligned_alloc(std::size_t size, hc::accelerator &acc, unsigned fla
+  *
+  * @see am_free, am_copy
+  */
++auto_voidp am_alloc_with_flags(std::size_t size, hc::accelerator &acc, unsigned flags, unsigned memFlags);
++
+ auto_voidp am_alloc(std::size_t size, hc::accelerator &acc, unsigned flags);
+ 
+ /**
+diff --git a/lib/hsa/hc_am.cpp b/lib/hsa/hc_am.cpp
+index 2c0dc151..10efeb98 100644
+--- a/lib/hsa/hc_am.cpp
++++ b/lib/hsa/hc_am.cpp
+@@ -245,7 +245,7 @@ AmPointerTracker g_amPointerTracker;  // Track all am pointer allocations.
+ namespace hc {
+ 
+ // Allocate accelerator memory, return NULL if memory could not be allocated:
+-auto_voidp am_aligned_alloc(std::size_t sizeBytes, hc::accelerator &acc, unsigned flags, std::size_t alignment)
++auto_voidp am_aligned_alloc_with_flags(std::size_t sizeBytes, hc::accelerator &acc, unsigned flags, std::size_t alignment, unsigned memFlags)
+ {
+     void *ptr = NULL;
+ 
+@@ -265,7 +265,7 @@ auto_voidp am_aligned_alloc(std::size_t sizeBytes, hc::accelerator &acc, unsigne
+ 
+             if (alloc_region && alloc_region->handle != -1) {
+                 sizeBytes = alignment != 0 ? sizeBytes + alignment : sizeBytes;
+-                hsa_status_t s1 = hsa_amd_memory_pool_allocate(*alloc_region, sizeBytes, 0, &ptr);
++                hsa_status_t s1 = hsa_amd_memory_pool_allocate(*alloc_region, sizeBytes, memFlags, &ptr);
+ 
+                 void *unalignedPtr = ptr;
+                 if (alignment != 0) {
+@@ -304,6 +304,16 @@ auto_voidp am_aligned_alloc(std::size_t sizeBytes, hc::accelerator &acc, unsigne
+     return ptr;
+ };
+ 
++auto_voidp am_aligned_alloc(std::size_t sizeBytes, hc::accelerator &acc, unsigned flags, std::size_t alignment)
++{
++    return am_aligned_alloc_with_flags(sizeBytes, acc, flags, alignment, 0);
++};
++
++auto_voidp am_alloc_with_flags(std::size_t sizeBytes, hc::accelerator &acc, unsigned flags, unsigned memFlags)
++{
++    return am_aligned_alloc_with_flags(sizeBytes, acc, flags, 0, memFlags);
++};
++
+ auto_voidp am_alloc(std::size_t sizeBytes, hc::accelerator &acc, unsigned flags)
+ {
+     return am_aligned_alloc(sizeBytes, acc, flags, 0);

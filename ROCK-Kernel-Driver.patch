@@ -1,0 +1,123 @@
+diff --git a/drivers/gpu/drm/amd/amdgpu/Makefile b/drivers/gpu/drm/amd/amdgpu/Makefile
+index adb470351d6a..af1d0a66602a 100644
+--- a/drivers/gpu/drm/amd/amdgpu/Makefile
++++ b/drivers/gpu/drm/amd/amdgpu/Makefile
+@@ -27,7 +27,7 @@ FULL_AMD_PATH=$(src)/..
+ DISPLAY_FOLDER_NAME=display
+ FULL_AMD_DISPLAY_PATH = $(FULL_AMD_PATH)/$(DISPLAY_FOLDER_NAME)
+ 
+-ccflags-y := -I$(FULL_AMD_PATH)/include/asic_reg \
++ccflags-y := -DDEBUG -I$(FULL_AMD_PATH)/include/asic_reg \
+ 	-I$(FULL_AMD_PATH)/include \
+ 	-I$(FULL_AMD_PATH)/amdgpu \
+ 	-I$(FULL_AMD_PATH)/powerplay/inc \
+@@ -197,6 +197,16 @@ include $(FULL_AMD_PATH)/backport/Makefile
+ 
+ obj-$(CONFIG_DRM_AMDGPU)+= amdgpu.o
+ 
++#debug for specific files
++CFLAGS_amdgpu.o += -DDEBUG
++CFLAGS_amdgpu_amdkfd_gpuvm.o += -DDEBUG
++CFLAGS_amdgpu_amdkfd.o += -DDEBUG
++CFLAGS_amdgpu_amdkfd_gfx_v9.o += -DDEBUG
++CFLAGS_amdgpu_bo_list.o += -DDEBUG
++CFLAGS_amdgpu_object.o += -DDEBUG
++CFLAGS_amdgpu_vram_mgr.o += -DDEBUG
++CFLAGS_gfx_v9_0.o += -DDEBUG
++
+ #if defined(BUILD_AS_DKMS)
+ CFLAGS_amdgpu_trace_points.o := -I$(src)
+ #endif
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+index fbf2ba741a18..cb3d514b1ca9 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+@@ -47,6 +47,8 @@
+  */
+ #define AMDGPU_USERPTR_RESTORE_DELAY_MS 1
+ 
++unsigned int globalVar = 0;
++
+ /* Impose limit on how much memory KFD can use */
+ static struct {
+ 	uint64_t max_system_mem_limit;
+@@ -1186,6 +1188,10 @@ int amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu(
+ 			VI_BO_SIZE_ALIGN : 1;
+ 
+ 	mapping_flags = AMDGPU_VM_PAGE_READABLE;
++	if(flags & (1ULL << 20)){
++		mapping_flags |= (1ULL<<20);
++	}
++
+ 	if (flags & ALLOC_MEM_FLAGS_WRITABLE)
+ 		mapping_flags |= AMDGPU_VM_PAGE_WRITEABLE;
+ 	if (flags & ALLOC_MEM_FLAGS_EXECUTABLE)
+@@ -1194,6 +1200,7 @@ int amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu(
+ 		mapping_flags |= AMDGPU_VM_MTYPE_UC;
+ 	else
+ 		mapping_flags |= AMDGPU_VM_MTYPE_NC;
++
+ 	(*mem)->mapping_flags = mapping_flags;
+ 
+ 	amdgpu_sync_create(&(*mem)->sync);
+@@ -1450,6 +1457,8 @@ int amdgpu_amdkfd_gpuvm_map_memory_to_gpu(
+ 	}
+ 
+ 	list_for_each_entry(entry, &mem->bo_va_list, bo_list) {
++		if(mem->mapping_flags & (1ULL << 20))
++			globalVar = 1;
+ 		if (entry->bo_va->base.vm == vm && !entry->is_mapped) {
+ 			pr_debug("\t map VA 0x%llx - 0x%llx in entry %p\n",
+ 					entry->va, entry->va + bo_size,
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+index 24a86d189024..540673998b89 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+@@ -50,6 +50,7 @@
+ #include "amdgpu_sdma.h"
+ #include "bif/bif_4_1_d.h"
+ 
++extern unsigned int globalVar;
+ static int amdgpu_map_buffer(struct ttm_buffer_object *bo,
+ 			     struct ttm_mem_reg *mem, unsigned num_pages,
+ 			     uint64_t offset, unsigned window,
+@@ -1451,6 +1452,13 @@ uint64_t amdgpu_ttm_tt_pte_flags(struct amdgpu_device *adev, struct ttm_tt *ttm,
+ 	if (!amdgpu_ttm_tt_is_readonly(ttm))
+ 		flags |= AMDGPU_PTE_WRITEABLE;
+ 
++	if (mem && globalVar){
++		pr_debug("flags were %llx\n", flags);
++		flags &= ~AMDGPU_PTE_WRITEABLE;
++		globalVar = 0;
++		pr_debug("flags are %llx\n", flags);
++	}
++
+ 	return flags;
+ }
+ 
+diff --git a/drivers/gpu/drm/amd/amdgpu/gfxhub_v1_0.c b/drivers/gpu/drm/amd/amdgpu/gfxhub_v1_0.c
+index 7bb5359d0bbd..c10ed568ca6c 100644
+--- a/drivers/gpu/drm/amd/amdgpu/gfxhub_v1_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gfxhub_v1_0.c
+@@ -236,7 +236,7 @@ static void gfxhub_v1_0_setup_vmid_config(struct amdgpu_device *adev)
+ 				    block_size);
+ 		/* Send no-retry XNACK on fault to suppress VM fault storm. */
+ 		tmp = REG_SET_FIELD(tmp, VM_CONTEXT1_CNTL,
+-				    RETRY_PERMISSION_OR_INVALID_PAGE_FAULT, 1);
++				    RETRY_PERMISSION_OR_INVALID_PAGE_FAULT, 0);
+ 		WREG32_SOC15_OFFSET(GC, 0, mmVM_CONTEXT1_CNTL, i, tmp);
+ 		WREG32_SOC15_OFFSET(GC, 0, mmVM_CONTEXT1_PAGE_TABLE_START_ADDR_LO32, i*2, 0);
+ 		WREG32_SOC15_OFFSET(GC, 0, mmVM_CONTEXT1_PAGE_TABLE_START_ADDR_HI32, i*2, 0);
+diff --git a/drivers/gpu/drm/amd/amdgpu/mmhub_v1_0.c b/drivers/gpu/drm/amd/amdgpu/mmhub_v1_0.c
+index 1741056e6af6..2a039946a549 100644
+--- a/drivers/gpu/drm/amd/amdgpu/mmhub_v1_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/mmhub_v1_0.c
+@@ -255,7 +255,7 @@ static void mmhub_v1_0_setup_vmid_config(struct amdgpu_device *adev)
+ 				    block_size);
+ 		/* Send no-retry XNACK on fault to suppress VM fault storm. */
+ 		tmp = REG_SET_FIELD(tmp, VM_CONTEXT1_CNTL,
+-				    RETRY_PERMISSION_OR_INVALID_PAGE_FAULT, 1);
++				    RETRY_PERMISSION_OR_INVALID_PAGE_FAULT, 0);
+ 		WREG32_SOC15_OFFSET(MMHUB, 0, mmVM_CONTEXT1_CNTL, i, tmp);
+ 		WREG32_SOC15_OFFSET(MMHUB, 0, mmVM_CONTEXT1_PAGE_TABLE_START_ADDR_LO32, i*2, 0);
+ 		WREG32_SOC15_OFFSET(MMHUB, 0, mmVM_CONTEXT1_PAGE_TABLE_START_ADDR_HI32, i*2, 0);

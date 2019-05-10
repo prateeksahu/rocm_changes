@@ -1,0 +1,45 @@
+diff --git a/include/hsakmttypes.h b/include/hsakmttypes.h
+index 06d650c..e6bfd97 100644
+--- a/include/hsakmttypes.h
++++ b/include/hsakmttypes.h
+@@ -530,7 +530,8 @@ typedef struct _HsaMemFlags
+ 					    // The KFD will ensure that the memory returned is allocated in the optimal memory location
+ 					    // and optimal alignment requirements
+             unsigned int FixedAddress : 1; // Allocate memory at specified virtual address. Fail if address is not free.
+-            unsigned int Reserved    : 16;
++            unsigned int MallocAccess : 1; // Allocate memory at use time. 
++            unsigned int Reserved    : 15;
+ 
+         } ui32;
+         HSAuint32 Value;
+diff --git a/src/fmm.c b/src/fmm.c
+index 8c2b530..2f9ef7f 100644
+--- a/src/fmm.c
++++ b/src/fmm.c
+@@ -1324,6 +1324,9 @@ void *fmm_allocate_device(uint32_t gpu_id, void *address, uint64_t MemorySizeInB
+ 
+ 	if (flags.ui32.HostAccess)
+ 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
++	if (flags.ui32.MallocAccess){
++		ioc_flags |= (1ULL<<20);
++	}
+ 
+ 	ioc_flags |= fmm_translate_hsa_to_ioc_flags(flags);
+ 
+@@ -1337,7 +1340,6 @@ void *fmm_allocate_device(uint32_t gpu_id, void *address, uint64_t MemorySizeInB
+ 
+ 	if (!flags.ui32.CoarseGrain || svm.disable_cache)
+ 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
+-
+ 	mem = __fmm_allocate_device(gpu_id, address, size, aperture, &mmap_offset,
+ 				    ioc_flags, &vm_obj);
+ 
+@@ -1398,7 +1400,7 @@ void *fmm_allocate_doorbell(uint32_t gpu_id, uint64_t MemorySizeInBytes,
+ 		flags.Value = 0;
+ 		flags.ui32.NonPaged = 1;
+ 		flags.ui32.HostAccess = 1;
+-		flags.ui32.Reserved = 0xBe11;
++		flags.ui32.Reserved = 0x7e11;
+ 
+ 		pthread_mutex_lock(&aperture->fmm_mutex);
+ 		vm_obj->flags = flags.Value;

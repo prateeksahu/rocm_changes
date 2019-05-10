@@ -1,0 +1,13 @@
+diff --git a/src/core/runtime/amd_memory_region.cpp b/src/core/runtime/amd_memory_region.cpp
+index d2bb4e9..afc97a2 100644
+--- a/src/core/runtime/amd_memory_region.cpp
++++ b/src/core/runtime/amd_memory_region.cpp
+@@ -165,6 +165,8 @@ hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, voi
+   HsaMemFlags kmt_alloc_flags(mem_flag_);
+   kmt_alloc_flags.ui32.ExecuteAccess =
+       (alloc_flags & AllocateExecutable ? 1 : 0);
++  kmt_alloc_flags.ui32.MallocAccess =
++      (alloc_flags & ((1ULL)<<20) ? 1 : 0);
+   kmt_alloc_flags.ui32.AQLQueueMemory =
+       (alloc_flags & AllocateDoubleMap ? 1 : 0);
+ 

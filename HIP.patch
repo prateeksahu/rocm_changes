@@ -1,0 +1,116 @@
+diff --git a/include/hip/hcc_detail/hip_runtime_api.h b/include/hip/hcc_detail/hip_runtime_api.h
+index ba561472..fde6e4db 100644
+--- a/include/hip/hcc_detail/hip_runtime_api.h
++++ b/include/hip/hcc_detail/hip_runtime_api.h
+@@ -1055,6 +1055,8 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
+  *  @see hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D, hipMalloc3DArray,
+  * hipHostFree, hipHostMalloc
+  */
++hipError_t hipMallocWithFlags(void** ptr, size_t size, unsigned flags);
++
+ hipError_t hipMalloc(void** ptr, size_t size);
+ 
+ /**
+diff --git a/include/hip/hip_runtime_api.h b/include/hip/hip_runtime_api.h
+index 34363689..4ece1c28 100644
+--- a/include/hip/hip_runtime_api.h
++++ b/include/hip/hip_runtime_api.h
+@@ -325,6 +325,11 @@ enum hipComputeMode {
+  * @see hipMalloc
+  */
+ #if defined(__cplusplus) && !defined(__HIP_DISABLE_CPP_FUNCTIONS__)
++template <class T>
++static inline hipError_t hipMallocWithFlags(T** devPtr, size_t size, unsigned flags) {
++    return hipMallocWithFlags((void**)devPtr, size, flags);
++}
++
+ template <class T>
+ static inline hipError_t hipMalloc(T** devPtr, size_t size) {
+     return hipMalloc((void**)devPtr, size);
+diff --git a/src/hip_memory.cpp b/src/hip_memory.cpp
+index e3823c50..1717ce12 100644
+--- a/src/hip_memory.cpp
++++ b/src/hip_memory.cpp
+@@ -108,19 +108,25 @@ int sharePtr(void* ptr, ihipCtx_t* ctx, bool shareWithAll, unsigned hipFlags) {
+ 
+ // Allocate a new pointer with am_alloc and share with all valid peers.
+ // Returns null-ptr if a memory error occurs (either allocation or sharing)
+-void* allocAndSharePtr(const char* msg, size_t sizeBytes, ihipCtx_t* ctx, bool shareWithAll,
+-                       unsigned amFlags, unsigned hipFlags, size_t alignment) {
++void* allocAndSharePtrWithFlags(const char* msg, size_t sizeBytes, ihipCtx_t* ctx, bool shareWithAll,
++                    unsigned amFlags, unsigned hipFlags, size_t alignment, unsigned memFlags) {
+     void* ptr = nullptr;
+ 
+     auto device = ctx->getWriteableDevice();
+ 
+ #if (__hcc_workweek__ >= 17332)
+     if (alignment != 0) {
+-        ptr = hc::am_aligned_alloc(sizeBytes, device->_acc, amFlags, alignment);
++        if (memFlags == 0 )
++            ptr = hc::am_aligned_alloc(sizeBytes, device->_acc, amFlags, alignment);
++        else
++            ptr = hc::am_aligned_alloc_with_flags(sizeBytes, device->_acc, amFlags, alignment, memFlags);
+     } else
+ #endif
+     {
+-        ptr = hc::am_alloc(sizeBytes, device->_acc, amFlags);
++        if(memFlags == 0)
++            ptr = hc::am_alloc(sizeBytes, device->_acc, amFlags);
++        else
++            ptr = hc::am_alloc_with_flags(sizeBytes, device->_acc, amFlags, memFlags);
+     }
+     tprintf(DB_MEM, " alloc %s ptr:%p-%p size:%zu on dev:%d\n", msg, ptr,
+             static_cast<char*>(ptr) + sizeBytes, sizeBytes, device->_deviceId);
+@@ -140,6 +146,11 @@ void* allocAndSharePtr(const char* msg, size_t sizeBytes, ihipCtx_t* ctx, bool s
+     return ptr;
+ }
+ 
++void* allocAndSharePtr(const char* msg, size_t sizeBytes, ihipCtx_t* ctx, bool shareWithAll,
++                       unsigned amFlags, unsigned hipFlags, size_t alignment) {
++    return allocAndSharePtrWithFlags(msg, sizeBytes, ctx, shareWithAll, amFlags, hipFlags,
++                                                                       alignment, 0);
++}
+ 
+ }  // end namespace hip_internal
+ 
+@@ -236,25 +247,23 @@ hipError_t hipHostGetDevicePointer(void** devicePointer, void* hostPointer, unsi
+ }
+ 
+ 
+-hipError_t hipMalloc(void** ptr, size_t sizeBytes) {
++hipError_t hipMallocWithFlags(void** ptr, size_t sizeBytes, unsigned memFlags) {
+     HIP_INIT_SPECIAL_API(hipMalloc, (TRACE_MEM), ptr, sizeBytes);
+     HIP_SET_DEVICE();
+     hipError_t hip_status = hipSuccess;
+ 
++
+     auto ctx = ihipGetTlsDefaultCtx();
+     // return NULL pointer when malloc size is 0
+     if (sizeBytes == 0) {
+         *ptr = NULL;
+         hip_status = hipSuccess;
+-
+     } else if ((ctx == nullptr) || (ptr == nullptr)) {
+         hip_status = hipErrorInvalidValue;
+-
+     } else {
+         auto device = ctx->getWriteableDevice();
+-        *ptr = hip_internal::allocAndSharePtr("device_mem", sizeBytes, ctx, false /*shareWithAll*/,
+-                                              0 /*amFlags*/, 0 /*hipFlags*/, 0);
+-
++        *ptr = hip_internal::allocAndSharePtrWithFlags("device_mem", sizeBytes, ctx, false /*shareWithAll*/,
++                                              0 /*amFlags*/, 0 /*hipFlags*/, 0, memFlags);
+         if (sizeBytes && (*ptr == NULL)) {
+             hip_status = hipErrorMemoryAllocation;
+         }
+@@ -264,6 +273,10 @@ hipError_t hipMalloc(void** ptr, size_t sizeBytes) {
+     return ihipLogStatus(hip_status);
+ }
+ 
++hipError_t hipMalloc(void** ptr, size_t sizeBytes) {
++    return hipMallocWithFlags(ptr, sizeBytes, 0);
++}
++
+ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flags) {
+     HIP_INIT_SPECIAL_API(hipExtMallocWithFlags, (TRACE_MEM), ptr, sizeBytes, flags);
+     HIP_SET_DEVICE();
